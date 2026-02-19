@@ -5,7 +5,11 @@ spring:
 application:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/reserve
+    url: jdbc:mysql://localhost:3306/reserve?rewriteBatchedStatements=true&useServerPrepStmts=true
     username: root
     password: root
 
+logging:
+  level:
+    org.hibernate.orm.jdbc.batch: DEBUG
+    org.hibernate.engine.jdbc.batch.internal: DEBUG

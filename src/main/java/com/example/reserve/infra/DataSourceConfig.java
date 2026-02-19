@@ -66,6 +66,13 @@ public class DataSourceConfig {
         jpaProps.put("hibernate.format_sql", "true");
         jpaProps.put("hibernate.jdbc.time_zone", "Asia/Seoul");
 
+        jpaProps.put("hibernate.jdbc.batch_size", 100);
+        jpaProps.put("hibernate.order_inserts", true);
+        jpaProps.put("hibernate.generate_statistics", true);
+        jpaProps.put("hibernate.physical_naming_strategy",
+                "org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy");
+        jpaProps.put("hibernate.implicit_naming_strategy",
+                "org.hibernate.boot.model.naming.ImplicitNamingStrategyJpaCompliantImpl");
         emf.setJpaPropertyMap(jpaProps);
         return emf;
     }

@@ -1,12 +1,17 @@
 package com.example.reserve.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.*;import lombok.Builder;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+@Getter
+@Setter
 @Entity
+@Table(name = "events")
 public class Events {
 
     @Id
@@ -16,7 +21,9 @@ public class Events {
     private String title;
     private LocalDateTime eventDate;
     private Integer totalSeats;
+    @Column( name = "available_seats")
     private Integer availableSeats;
+    @Version
     private Integer version;
     private LocalDateTime createdAt;
 
