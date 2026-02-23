@@ -8,6 +8,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -15,8 +16,7 @@ import java.util.UUID;
 @Setter
 @Entity
 @Table(name = "reservations")
-@EntityListeners(AuditingEntityListener.class)
-public class Reservations {
+public class Reservations extends BaseEntity{
 
     @Id
     @GeneratedValue( strategy = GenerationType.UUID)
@@ -32,8 +32,7 @@ public class Reservations {
     @Enumerated(EnumType.STRING)
     private ReservationStatus status;
     private LocalDateTime expiresAt;
-    @CreatedDate
-    private LocalDateTime createdAt;
+    private BigDecimal totalAmount;
     @LastModifiedDate
     private LocalDateTime updatedAt;
 }

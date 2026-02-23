@@ -18,6 +18,7 @@ public interface SeatsRepository extends JpaRepository<Seats, UUID> {
 
 
     Optional<Seats> findByEvent_IdAndSeatNumber( UUID eventId, String seatNumber );
+
     Optional<Seats> findByEvent_IdAndSeatNumberAndSeatStatus(UUID eventId, String seatNumber, SeatStatus seatStatus);
 
 //    @Lock(LockModeType.PESSIMISTIC_WRITE)

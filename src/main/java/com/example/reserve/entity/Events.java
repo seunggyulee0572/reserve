@@ -12,7 +12,7 @@ import java.util.UUID;
 @Setter
 @Entity
 @Table(name = "events")
-public class Events {
+public class Events extends BaseEntity {
 
     @Id
     @GeneratedValue( strategy = GenerationType.UUID)
@@ -23,9 +23,8 @@ public class Events {
     private Integer totalSeats;
     @Column( name = "available_seats")
     private Integer availableSeats;
-    @Version
-    private Integer version;
-    private LocalDateTime createdAt;
+//    @Version
+//    private Integer version;
 
     @OneToMany( fetch =  FetchType.LAZY, cascade = CascadeType.ALL, mappedBy = "event")
     private List<Seats> seats;

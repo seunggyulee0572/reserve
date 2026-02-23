@@ -3,6 +3,7 @@ package com.example.reserve;
 import com.example.reserve.domain.EventService;
 import com.example.reserve.domain.ReservationService;
 import com.example.reserve.domain.SeatService;
+import com.example.reserve.entity.Events;
 import com.example.reserve.model.AttemptResult;
 import com.example.reserve.repository.EventsRepository;
 import com.example.reserve.repository.ReservationsRepository;
@@ -32,9 +33,13 @@ class ReserveApplicationTests {
     @Autowired
     EventsRepository eventsRepository;
     @Autowired
+    EventService eventService;
+    @Autowired
+    SeatService seatService;
+    @Autowired
     ReservationsRepository reservationsRepository;
 
-    private final UUID eventId = UUID.fromString("2c5e47a4-057a-471f-a6e3-d5b998bc45b5");
+    private final UUID eventId = UUID.fromString("628032ff-77fa-49a4-a9b9-0f588ac94f32");
     @Test
     void race_pessimistic_lock() throws Exception {
 
@@ -53,7 +58,7 @@ class ReserveApplicationTests {
 
     @Test
     void race_no_lock() throws Exception {
-        String seatNumber = "1-A";
+        String seatNumber = "9-A";
         int threads = 500;
 
         var results = runRace(threads, () -> {
@@ -63,8 +68,6 @@ class ReserveApplicationTests {
 
         printSummary("no_lock", results);
         verifyDbState(eventId, seatNumber);
-
-        Thread.sleep(4000000);
 
     }
 
@@ -126,31 +129,36 @@ class ReserveApplicationTests {
         var seat = seatsRepository.findByEvent_IdAndSeatNumber(eventId, seatNumber)
                 .orElseThrow();
 
+        Events event = eventsRepository.findById(eventId).orElseThrow();
+
+        long availableCount = event.getAvailableSeats();
         long reservationCnt = reservationsRepository.countByEvent_IdAndSeats_Id(eventId, seat.getId());
 
         System.out.println("[DB] seatStatus=" + seat.getSeatStatus()
                 + " reservedBy=" + seat.getReservedBy()
-                + " reservationCnt=" + reservationCnt);
+                + " reservationCnt=" + reservationCnt
+                + " availableCount=" + availableCount);
 
         // 기대: 한 좌석이면 reservationCnt는 보통 1이 나와야 정상
     }
 
-//    @Test
-//    @Transactional
-//    @Rollback(false)
-//    void contextLoads() {
-//
-//        eventService.generateEvent();
-//    }
-//
-//    @Test
-//    @Transactional
-//    @Rollback(false)
-//    void initSeats() {
-//
-//        UUID eventId = eventService.getEventId();
-//        seatService.makeSeat( eventId );
-//    }
+    @Test
+    @Transactional
+    @Rollback(false)
+    void contextLoads() {
+
+        eventService.generateEvent();
+    }
+
+    @Test
+    @Transactional
+    @Rollback(false)
+    void initSeats() {
+
+        UUID eventId = eventService.getEventId();
+        System.out.println(eventId);
+        seatService.makeSeat( eventId );
+    }
 
     private List<AttemptResult> runRace(int threads, Callable<UUID> action) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(threads);

@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -30,8 +31,9 @@ public class Seats {
 
     private LocalDateTime reservedAt;
     private String reservedBy;
-    @Version
-    private Integer version;
+    private BigDecimal basePrice;
+//    @Version
+//    private Integer version;
 
 }
 
