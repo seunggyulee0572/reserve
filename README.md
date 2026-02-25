@@ -41,7 +41,6 @@ select for update ( 베타적락 획득, 다른 트랜잭션 읽기 가능, lock
 ## 서비스 운영
 Spring Boot, Mysql, Kafka, Redis, K6, Prometheus, Alert Manager, Grafana
 
----
 
 ## 시나리오
 
@@ -71,8 +70,6 @@ select for update ( 배타적락 획득, 다른 트랜잭션 읽기 가능, lock
 하지만 InnoDB는 MVCC 기반으로 version snapshot을 유지하기 때문에  
 읽기 요청은 이전 버전 snapshot을 통해 접근이 가능하다.
 
----
-
 ## 테스트 해석
 
 ### 테스트 조건
@@ -84,8 +81,7 @@ select for update ( 배타적락 획득, 다른 트랜잭션 읽기 가능, lock
 
 ## pessimistic_lock
 
----
-
+```
 total : 537ms
 Innodb_row_lock_waits diff = 499
 Innodb_row_lock_time diff = 3116
@@ -103,11 +99,11 @@ InnoDB 내부 지표에서 lock wait 횟수가 499 증가한 것은
 락을 잡은 트랜잭션이 커밋될 때까지 다른 요청이 대기하게 되므로  
 총 수행 시간(total time)이 가장 길게 나타난다.
 
-
+```
 
 ## no_lock
 
----
+```
 
 total : 339ms
 Innodb_row_lock_waits diff = 7
@@ -124,10 +120,11 @@ lock wait 지표는 거의 증가하지 않았으며,
 속도는 가장 빠르게 보이지만,  
 좌석 시스템에서는 사용하기 어려운 방식이다.
 
+```
+
 ## atomic_update
 
----
-
+```
 total : 396~401ms
 Innodb_row_lock_waits diff = 499
 Innodb_row_lock_time diff = 1872
@@ -153,10 +150,11 @@ WHERE id=? AND status='AVAILABLE'
 즉, atomic update는 lock이 없다는 의미가 아니라  
 lock 유지 시간이 상대적으로 짧은 구조라고 보는 것이 맞다.
 
+```
+
 ## optimistic
 
----
-
+```
 total : 339ms
 Innodb_row_lock_waits diff = 7
 optimistic lock fail = 7
@@ -179,7 +177,7 @@ version 조건에 의해 실제 반영되는 것은 하나뿐이다.
 lock wait 증가량이 7 정도로 작게 나온 것도  
 실제로 UPDATE 단계까지 진입한 요청 수가 적었기 때문으로 해석할 수 있다.
 
----
+```
 
 ## 종합 비교
 
