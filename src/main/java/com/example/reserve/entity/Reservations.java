@@ -35,4 +35,6 @@ public class Reservations extends BaseEntity{
     private BigDecimal totalAmount;
     @LastModifiedDate
     private LocalDateTime updatedAt;
+    private LocalDateTime lockedAt;
+    private UUID workerId;
 }

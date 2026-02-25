@@ -3,6 +3,7 @@ package com.example.reserve.repository;
 import com.example.reserve.entity.Seats;
 import com.example.reserve.model.enums.SeatStatus;
 import jakarta.persistence.LockModeType;
+import jakarta.transaction.Transactional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -41,6 +42,20 @@ public interface SeatsRepository extends JpaRepository<Seats, UUID> {
            and s.seatStatus = 'AVAILABLE'
     """)
     int reserveIfAvailable(UUID eventId, String seatNumber, String userId, LocalDateTime now);
+
+    @Modifying
+    @Transactional
+    @Query(value = """
+        UPDATE seats s
+           SET s.status='AVAILABLE',
+               s.reserved_by=NULL,
+               s.reserved_at=NULL
+         WHERE s.id = :seatId
+           AND s.status='RESERVED'
+           AND (:userId IS NULL OR s.reserved_by = :userId)
+        """, nativeQuery = true)
+    int restoreSeatIfMatches(@Param("seatId") UUID seatId, @Param("userId") String userId);
+
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""

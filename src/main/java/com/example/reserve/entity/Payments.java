@@ -13,7 +13,7 @@ import java.util.UUID;
 @Getter
 @Setter
 @Entity
-@Table("payments")
+@Table( name = "payments")
 public class Payments extends BaseEntity{
 
     @Id
@@ -21,7 +21,7 @@ public class Payments extends BaseEntity{
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn("reservation_id")
+    @JoinColumn( name = "reservation_id")
     private Reservations reservation;
     private BigDecimal amount;
     @Enumerated(EnumType.STRING)

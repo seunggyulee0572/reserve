@@ -52,14 +52,13 @@ public class ReservationService {
         Events event = eventsRepository.findById(eventId)
                 .orElseThrow(() -> new IllegalArgumentException("event not found"));
 
-
         Reservations r = new Reservations();
         r.setEvent(event);
         r.setSeats(seat);
         r.setStatus(ReservationStatus.PENDING);
         r.setCreatedAt(LocalDateTime.now());
         r.setExpiresAt(LocalDateTime.now().plusMinutes(5));
-
+        r.setUserId(userId);
         reservationsRepository.save(r);
 
         return r.getId();
@@ -122,7 +121,7 @@ public class ReservationService {
         if (eventUpdated == 0) {
             // event가 매진이면 방금 잡은 seat을 되돌려야 함
             seatsRepository.rollbackReservedSeat(eventId, seatNumber, userId);
-            throw new RuntimeException("sold out");
+            throw new RuntimeException("no event seat");
         }
 
         // 3) 내가 잡은 좌석을 userId로 확정 조회
@@ -138,7 +137,7 @@ public class ReservationService {
         r.setStatus(ReservationStatus.PENDING);
         r.setCreatedAt(now);
         r.setExpiresAt(now.plusMinutes(5));
-
+        r.setUserId(userId);
         reservationsRepository.save(r);
 
         return r.getId();
@@ -174,9 +173,15 @@ public class ReservationService {
         r.setStatus(ReservationStatus.PENDING);
         r.setCreatedAt(LocalDateTime.now());
         r.setExpiresAt(LocalDateTime.now().plusMinutes(5));
+        r.setUserId(userId);
 
         reservationsRepository.save(r);
 
         return r.getId();
+    }
+
+    public int rollbackExpired( UUID eventId ){
+
+        reservationsRepository.
     }
 }
