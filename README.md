@@ -111,11 +111,18 @@ InnoDB 내부 지표에서 lock wait 횟수가 499 증가한 것은
 ## no_lock
 
 ```
-
-total : 339ms
-Innodb_row_lock_waits diff = 7
-success = 8
-reservationCnt = 8
+no_lock , total : 339ms
+=== no_lock : InnoDB row lock status diff ===
+Innodb_row_lock_current_waits: before=0 after=0 diff=0
+Innodb_row_lock_time: before=165946 after=166308 diff=362
+Innodb_row_lock_time_avg: before=39 after=39 diff=0
+Innodb_row_lock_time_max: before=170 after=170 diff=0
+Innodb_row_lock_waits: before=4166 after=4173 diff=7
+==== no_lock ====
+threads=500 success=8 fail=492
+fail reasons={IllegalArgumentException:seat not found=492}
+fastest success=[AttemptResult[idx=466, success=true, reservationId=fd703051-9c17-46cf-b8be-59d1e8afd62e, errorType=null, errorMsg=null, tookMs=107], AttemptResult[idx=122, success=true, reservationId=6b1dfc8f-d82d-4d01-a64a-061b4bbe9d0f, errorType=null, errorMsg=null, tookMs=112], AttemptResult[idx=14, success=true, reservationId=871633d7-4413-4197-81b4-0280a08095a7, errorType=null, errorMsg=null, tookMs=133], AttemptResult[idx=123, success=true, reservationId=e62bd3e2-7dff-4ec7-a67d-74159b2fb458, errorType=null, errorMsg=null, tookMs=137], AttemptResult[idx=106, success=true, reservationId=dd28a88b-5cb7-4088-a4f0-b45a4fa18cf1, errorType=null, errorMsg=null, tookMs=147]]
+[DB] seatStatus=RESERVED reservedBy=u-121 reservationCnt=8 availableCount=976
 
 
 락 없이 처리한 경우 여러 트랜잭션이 동시에 동일 좌석을 읽고 수정하게 되면서  
@@ -132,11 +139,19 @@ lock wait 지표는 거의 증가하지 않았으며,
 ## atomic_update
 
 ```
-total : 396~401ms
-Innodb_row_lock_waits diff = 499
-Innodb_row_lock_time diff = 1872
-success = 1
-fail = 499
+atomic_update , total : 401ms
+=== atomic_update : InnoDB row lock status diff ===
+Innodb_row_lock_current_waits: before=0 after=0 diff=0
+Innodb_row_lock_time: before=166308 after=168180 diff=1872
+Innodb_row_lock_time_avg: before=39 after=35 diff=-4
+Innodb_row_lock_time_max: before=170 after=170 diff=0
+Innodb_row_lock_waits: before=4173 after=4672 diff=499
+atomic_update , total : 396
+==== atomic_update ====
+threads=500 success=1 fail=499
+fail reasons={RuntimeException:sold out=499}
+fastest success=[AttemptResult[idx=162, success=true, reservationId=a416ec2f-49fa-453b-864f-3e82de7c0697, errorType=null, errorMsg=null, tookMs=99]]
+[DB] seatStatus=RESERVED reservedBy=u-203 reservationCnt=1 availableCount=975
 
 
 원자적 UPDATE는 WHERE 조건으로 선점 여부를 판단하는 방식이다.
@@ -162,10 +177,18 @@ lock 유지 시간이 상대적으로 짧은 구조라고 보는 것이 맞다.
 ## optimistic
 
 ```
-total : 339ms
-Innodb_row_lock_waits diff = 7
-optimistic lock fail = 7
-sold out = 492
+optimistic , total : 339ms
+=== optimistic : InnoDB row lock status diff ===
+Innodb_row_lock_current_waits: before=0 after=0 diff=0
+Innodb_row_lock_time: before=168180 after=168398 diff=218
+Innodb_row_lock_time_avg: before=35 after=35 diff=0
+Innodb_row_lock_time_max: before=170 after=170 diff=0
+Innodb_row_lock_waits: before=4672 after=4679 diff=7
+==== optimistic ====
+threads=500 success=1 fail=499
+fail reasons={ObjectOptimisticLockingFailureException:Batch update returned unexpected row count from update 0 (expected row count 1 but was 0) [update seats set base_price=?,event_id=?,reserved_at=?,reserved_by=?,seat_number=?,status=?,version=? where id=? and version=?] for entity [com.example.reserve.entity.Seats with id '38f13c18-4d53-4078-bef3-16afdd1a775e']=7, IllegalArgumentException:sold out=492}
+fastest success=[AttemptResult[idx=56, success=true, reservationId=8b3b0381-a155-4a30-a9ca-3781b9a228f8, errorType=null, errorMsg=null, tookMs=113]]
+[DB] seatStatus=RESERVED reservedBy=u-97 reservationCnt=1 availableCount=974
 
 
 낙관적 락에서는 먼저 SELECT를 통해 여러 요청이 동시에 좌석을 읽는다.
