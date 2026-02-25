@@ -82,11 +82,18 @@ select for update ( 배타적락 획득, 다른 트랜잭션 읽기 가능, lock
 ## pessimistic_lock
 
 ```
-total : 537ms
-Innodb_row_lock_waits diff = 499
-Innodb_row_lock_time diff = 3116
-success = 1
-fail = 499
+pessimistic_lock , total : 537ms
+=== pessimistic_lock : InnoDB row lock status diff ===
+Innodb_row_lock_current_waits: before=0 after=0 diff=0
+Innodb_row_lock_time: before=162830 after=165946 diff=3116
+Innodb_row_lock_time_avg: before=44 after=39 diff=-5
+Innodb_row_lock_time_max: before=170 after=170 diff=0
+Innodb_row_lock_waits: before=3667 after=4166 diff=499
+==== pessimistic_lock ====
+threads=500 success=1 fail=499
+fail reasons={IllegalStateException:already reserved=499}
+fastest success=[AttemptResult[idx=284, success=true, reservationId=d458a4c2-7480-4167-a5a2-7b11e0e7e91d, errorType=null, errorMsg=null, tookMs=100]]
+[DB] seatStatus=RESERVED reservedBy=u-325 reservationCnt=1 availableCount=973
 
 
 비관적 락에서는 최초 1개의 트랜잭션이 row lock을 획득한 이후,  
