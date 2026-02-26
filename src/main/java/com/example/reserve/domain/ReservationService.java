@@ -180,8 +180,5 @@ public class ReservationService {
         return r.getId();
     }
 
-    public int rollbackExpired( UUID eventId ){
 
-        reservationsRepository.
-    }
 }

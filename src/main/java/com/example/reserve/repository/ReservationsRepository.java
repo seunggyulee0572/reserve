@@ -4,6 +4,8 @@ import com.example.reserve.entity.Reservations;
 import com.example.reserve.model.dto.ReservationRefs;
 import com.example.reserve.model.enums.ReservationStatus;
 import jakarta.transaction.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -17,7 +19,9 @@ public interface ReservationsRepository extends JpaRepository<Reservations, UUID
 
     int countByEvent_IdAndSeats_Id( UUID eventId, UUID seatsId );
 
-    List<Reservations> findByStatusAndExpiresAtBefore(ReservationStatus status, LocalDateTime now);
+    Page<Reservations> findByStatusAndExpiresAtBefore(Pageable pageable,
+                                                      ReservationStatus status,
+                                                      LocalDateTime now);
 
 //    @Query(value = """
 //                SELECT r.id FROM reservations r
@@ -34,8 +38,31 @@ public interface ReservationsRepository extends JpaRepository<Reservations, UUID
            AND r.expires_at < NOW()
          ORDER BY r.expires_at ASC
          LIMIT :limit
+         FOR UPDATE
         """, nativeQuery = true)
-    List<UUID> findExpiredPendingIds(@Param("limit") int limit);
+    List<UUID> findExpiredPendingIdsForUpdate(@Param("limit") int limit);
+
+    @Query(value = """
+        SELECT r.id
+          FROM reservations r
+         WHERE r.status = 'PENDING'
+           AND r.expires_at < NOW()
+         ORDER BY r.expires_at ASC
+         LIMIT :limit
+         FOR UPDATE SKIP LOCKED;
+        """, nativeQuery = true)
+    List<UUID> findExpiredPendingIdsForUpdateSkip(@Param("limit") int limit);
+
+//    @Modifying
+//    @Query(value = """
+//        UPDATE reservations r
+//           SET r.status = 'EXPIRED',
+//               r.updated_at = NOW()
+//         WHERE r.id = :id
+//           AND r.status = 'PENDING'
+//           AND r.expires_at < NOW()
+//        """, nativeQuery = true)
+//    int markExpiredIfPendingAndExpired(@Param("id") UUID id);
 
     // PENDING -> EXPIRING 선점, 중복 실행 방지
     @Modifying
@@ -106,10 +133,28 @@ public interface ReservationsRepository extends JpaRepository<Reservations, UUID
         """, nativeQuery = true)
     ReservationRefs findRefsById(@Param("id") UUID id);
 
-    @Query(value = """
-        SELECT *
-        FROM reservations r
-        WHERE r.id IN :ids
-    """, nativeQuery = true)
+    @Query("""
+        select r from Reservations r
+        join fetch r.seats
+        join fetch r.event
+        where r.id in :ids
+        """)
     List<Reservations> findsByReservationsIds(@Param("ids") List<UUID> ids);
+
+    @Query(value = """
+        SELECT r.id       AS reservationId,
+               r.event_id AS eventId,
+               r.seat_id  AS seatId,
+               r.user_id  AS userId
+          FROM reservations r
+         WHERE r.status = :status
+           AND r.expires_at < :now
+         ORDER BY r.expires_at ASC
+         LIMIT :limit
+    """, nativeQuery = true)
+    List<ReservationRefs> findExpiredPendingRefs(
+            @Param("limit") int limit,
+            @Param("status") ReservationStatus status,
+            @Param("now") LocalDateTime now
+    );
 }

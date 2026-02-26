@@ -6,7 +6,7 @@ import com.example.reserve.domain.SeatService;
 import com.example.reserve.entity.Events;
 import com.example.reserve.entity.Reservations;
 import com.example.reserve.entity.Seats;
-import com.example.reserve.job.TestJob;
+import com.example.reserve.job.NaiveJob;
 import com.example.reserve.model.AttemptResult;
 import com.example.reserve.repository.EventsRepository;
 import com.example.reserve.repository.ReservationsRepository;
@@ -43,7 +43,7 @@ class ReserveApplicationTests {
     @Autowired
     ReservationsRepository reservationsRepository;
     @Autowired
-    TestJob testJob;
+    NaiveJob naiveJob;
     @Autowired
     JdbcTemplate jdbcTemplate;
 
@@ -150,10 +150,9 @@ class ReserveApplicationTests {
         long t0 = System.nanoTime();
         var before = innodbRowLockSnapshot();
 
-        var results = runScheduleRace(threads, () -> {
-            return testJob.runOnce();
-        });
-
+        var results = runScheduleRace(threads,
+                (idx, workerId) -> naiveJob.runOnce(3, workerId)
+        );
         var after = innodbRowLockSnapshot();
         printDiff("naive", before, after);
 
@@ -161,7 +160,17 @@ class ReserveApplicationTests {
 
         System.out.println( "naive_schedule , total : " + tookMs);
         printSummary("naive_schedule", results);
-        verifyScheduleState( results.stream().map( res -> UUID.fromString(res.reservationId()) ).toList() );
+
+        List<UUID> ids =
+                results.stream()
+                        .filter(AttemptResult::success)
+                        .flatMap(res -> Arrays.stream(res.reservationId().split(","))) // Stream<String>
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .map(UUID::fromString)   // 여기서 UUID 파싱
+                        .toList();
+
+        verifyScheduleState( ids );
     }
 
     // ===== 결과 출력 =====
@@ -216,14 +225,13 @@ class ReserveApplicationTests {
             Seats seat = r.getSeats();
             Events event = r.getEvent();
             System.out.println("[DB] seatStatus=" + seat.getSeatStatus()
+                    + " reservationId=" + r.getId()
                     + " reservedBy=" + seat.getReservedBy()
                     + " reservationStatus=" + r.getStatus()
                     + " availableCount=" + event.getAvailableSeats());
 
         } );
 
-
-        // 기대: 한 좌석이면 reservationCnt는 보통 1이 나와야 정상
     }
 
     @Test
@@ -290,7 +298,10 @@ class ReserveApplicationTests {
     }
 
 
-    private List<AttemptResult> runScheduleRace(int threads, Callable<List<UUID>> action) throws Exception {
+    private List<AttemptResult> runScheduleRace(
+            int threads,
+            java.util.function.BiFunction<Integer, String, List<UUID>> action
+    ) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(threads);
 
         CountDownLatch ready = new CountDownLatch(threads);
@@ -301,23 +312,28 @@ class ReserveApplicationTests {
 
         for (int i = 0; i < threads; i++) {
             final int idx = i;
+            final String workerId = "w-" + idx;
+
             pool.submit(() -> {
                 ready.countDown();
                 try {
                     start.await();
                     long t0 = System.nanoTime();
-                    List<UUID> reservationsIds = action.call();
+
+                    List<UUID> reservationIds = action.apply(idx, workerId);
+
                     long tookMs = (System.nanoTime() - t0) / 1_000_000;
-                    results.add(new AttemptResult(idx, true, String.join(",", reservationsIds.stream().map(uuid -> uuid.toString()).toList()), null, null, tookMs));
-                } catch (Exception e) {
-                    long tookMs = 0;
                     results.add(new AttemptResult(
-                            idx,
-                            false,
-                            null,
+                            idx, true,
+                            String.join(",", reservationIds.stream().map(UUID::toString).toList()),
+                            null, null, tookMs
+                    ));
+                } catch (Exception e) {
+                    results.add(new AttemptResult(
+                            idx, false, null,
                             e.getClass().getSimpleName(),
                             e.getMessage(),
-                            tookMs
+                            0
                     ));
                 } finally {
                     done.countDown();
@@ -326,11 +342,9 @@ class ReserveApplicationTests {
             });
         }
 
-        // 모든 스레드 준비될 때까지 대기 후 동시 발사
         ready.await();
         start.countDown();
         done.await();
-
         pool.shutdown();
         return results;
     }

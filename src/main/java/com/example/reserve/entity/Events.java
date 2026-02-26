@@ -23,8 +23,8 @@ public class Events extends BaseEntity {
     private Integer totalSeats;
     @Column( name = "available_seats")
     private Integer availableSeats;
-    @Version
-    private Integer version;
+//    @Version
+//    private Integer version;
 
     @OneToMany( fetch =  FetchType.LAZY, cascade = CascadeType.ALL, mappedBy = "event")
     private List<Seats> seats;

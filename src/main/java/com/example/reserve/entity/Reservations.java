@@ -36,5 +36,5 @@ public class Reservations extends BaseEntity{
     @LastModifiedDate
     private LocalDateTime updatedAt;
     private LocalDateTime lockedAt;
-    private UUID workerId;
+    private String workerId;
 }
