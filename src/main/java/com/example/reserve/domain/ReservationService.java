@@ -57,8 +57,10 @@ public class ReservationService {
         r.setSeats(seat);
         r.setStatus(ReservationStatus.PENDING);
         r.setCreatedAt(LocalDateTime.now());
-        r.setExpiresAt(LocalDateTime.now().plusMinutes(5));
+        r.setExpiresAt(LocalDateTime.now().plusDays(1));
         r.setUserId(userId);
+        r.setTotalAmount(seat.getBasePrice());
+
         reservationsRepository.save(r);
 
         return r.getId();
@@ -99,6 +101,7 @@ public class ReservationService {
         r.setCreatedAt(LocalDateTime.now());
         r.setExpiresAt(LocalDateTime.now().plusMinutes(5));
         r.setUpdatedAt(LocalDateTime.now());
+        r.setTotalAmount(seat.getBasePrice());
 
         reservationsRepository.saveAndFlush(r);
 
@@ -138,6 +141,49 @@ public class ReservationService {
         r.setCreatedAt(now);
         r.setExpiresAt(now.plusMinutes(5));
         r.setUserId(userId);
+        r.setTotalAmount(seat.getBasePrice());
+
+        reservationsRepository.save(r);
+
+        return r.getId();
+    }
+
+
+    @Transactional
+    public UUID generateExpired(UUID eventId, String seatNumber, String userId) {
+
+        LocalDateTime now = LocalDateTime.now();
+
+        int rowCount = seatsRepository.reserveIfAvailable(eventId, seatNumber, userId, now);
+
+        if( rowCount == 0 ){
+
+            throw new RuntimeException("sold out");
+        }
+
+        int eventUpdated = eventsRepository.decreaseIfAvailable(eventId);
+        if (eventUpdated == 0) {
+            // event가 매진이면 방금 잡은 seat을 되돌려야 함
+            seatsRepository.rollbackReservedSeat(eventId, seatNumber, userId);
+            throw new RuntimeException("no event seat");
+        }
+
+        // 3) 내가 잡은 좌석을 userId로 확정 조회
+        Seats seat = seatsRepository.findByEvent_IdAndSeatNumberAndReservedBy(eventId, seatNumber, userId)
+                .orElseThrow(() -> new IllegalStateException("reserved seat not found"));
+
+        Events event = eventsRepository.findById(eventId)
+                .orElseThrow(() -> new IllegalArgumentException("event not found"));
+
+        Reservations r = new Reservations();
+        r.setEvent(event);
+        r.setSeats(seat);
+        r.setStatus(ReservationStatus.PENDING);
+        r.setCreatedAt(now);
+        r.setExpiresAt(now.minusMinutes(4));
+        r.setUserId(userId);
+        r.setTotalAmount(seat.getBasePrice());
+
         reservationsRepository.save(r);
 
         return r.getId();
@@ -174,6 +220,7 @@ public class ReservationService {
         r.setCreatedAt(LocalDateTime.now());
         r.setExpiresAt(LocalDateTime.now().plusMinutes(5));
         r.setUserId(userId);
+        r.setTotalAmount(seat.getBasePrice());
 
         reservationsRepository.save(r);
 

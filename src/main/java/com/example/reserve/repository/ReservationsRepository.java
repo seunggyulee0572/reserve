@@ -32,26 +32,46 @@ public interface ReservationsRepository extends JpaRepository<Reservations, UUID
 
     // (방식 1) naive: 만료된 PENDING id 조회 (락 없음)
     @Query(value = """
-        SELECT r.id
+        SELECT BIN_TO_UUID(r.id)       AS reservationId,
+              BIN_TO_UUID(r.event_id) AS eventId,
+              BIN_TO_UUID(r.seat_id)  AS seatId,
+              r.user_id               AS userId
           FROM reservations r
          WHERE r.status = 'PENDING'
-           AND r.expires_at < NOW()
+           AND r.expires_at < NOW(6)
          ORDER BY r.expires_at ASC
          LIMIT :limit
          FOR UPDATE
         """, nativeQuery = true)
-    List<UUID> findExpiredPendingIdsForUpdate(@Param("limit") int limit);
+    List<ReservationRefs> findExpiredPendingIdsForUpdate(@Param("limit") int limit);
 
     @Query(value = """
-        SELECT r.id
+        SELECT BIN_TO_UUID(r.id)       AS reservationId,
+              BIN_TO_UUID(r.event_id) AS eventId,
+              BIN_TO_UUID(r.seat_id)  AS seatId,
+              r.user_id               AS userId
           FROM reservations r
          WHERE r.status = 'PENDING'
-           AND r.expires_at < NOW()
+           AND r.expires_at < NOW(6)
          ORDER BY r.expires_at ASC
          LIMIT :limit
          FOR UPDATE SKIP LOCKED;
         """, nativeQuery = true)
-    List<UUID> findExpiredPendingIdsForUpdateSkip(@Param("limit") int limit);
+    List<ReservationRefs> findExpiredPendingIdsForUpdateSkip(@Param("limit") int limit);
+
+
+    @Modifying
+    @Query(value = """
+        UPDATE reservations r
+           SET r.status = 'EXPIRED',
+               r.worker_id = :workerId,
+               r.updated_at = NOW(6)
+         WHERE r.id IN (:ids)
+           AND r.status = 'PENDING'
+           AND r.expires_at < NOW(6)
+        """, nativeQuery = true)
+    int updateExpiredBatch(@Param("ids") List<UUID> ids,
+                           @Param("workerId") String workerId);
 
 //    @Modifying
 //    @Query(value = """
@@ -71,25 +91,28 @@ public interface ReservationsRepository extends JpaRepository<Reservations, UUID
         UPDATE reservations r
            SET r.status    = 'EXPIRING',
                r.worker_id = :workerId,
-               r.locked_at = NOW(),
-               r.updated_at = NOW()
+               r.locked_at = NOW(6),
+               r.updated_at = NOW(6)
          WHERE r.status = 'PENDING'
-           AND r.expires_at < NOW()
+           AND r.expires_at < NOW(6)
          ORDER BY r.expires_at ASC
          LIMIT :limit
         """, nativeQuery = true)
-    int claimExpiredPending(@Param("workerId") UUID workerId, @Param("limit") int limit);
+    int claimExpiredPending(@Param("workerId") String workerId, @Param("limit") int limit);
 
     // 선점된(EXPIRING) 것들 id 조회
     @Query(value = """
-        SELECT r.id
+        SELECT BIN_TO_UUID(r.id)       AS reservationId,
+              BIN_TO_UUID(r.event_id) AS eventId,
+              BIN_TO_UUID(r.seat_id)  AS seatId,
+              r.user_id               AS userId
           FROM reservations r
          WHERE r.status = 'EXPIRING'
            AND r.worker_id = :workerId
          ORDER BY r.locked_at ASC
          LIMIT :limit
         """, nativeQuery = true)
-    List<UUID> findClaimedExpiringIds(@Param("workerId") UUID workerId, @Param("limit") int limit);
+    List<ReservationRefs> findClaimedExpiringIds(@Param("workerId") String workerId, @Param("limit") int limit);
 
     // (방식 3) SKIP LOCKED로 만료된 PENDING을 잠그고 가져오기 (MySQL 8)
     @Query(value = """
@@ -103,6 +126,16 @@ public interface ReservationsRepository extends JpaRepository<Reservations, UUID
         """, nativeQuery = true)
     List<UUID> lockAndFetchExpiredPendingIdsSkipLocked(@Param("limit") int limit);
 
+    @Modifying
+    @Transactional
+    @Query(value = """
+        UPDATE reservations r
+           SET r.status='EXPIRED', r.updated_at=NOW(6), r.worker_id = :workerId
+         WHERE r.id = :id
+           AND r.status IN ('PENDING', 'EXPIRING' )
+        """, nativeQuery = true)
+    int updateExpired(@Param("id") UUID id,
+                      @Param("workerId") String workerId);
     // (공통) 최종 확정: EXPIRING -> EXPIRED (혹은 PENDING -> EXPIRED)
     @Modifying
     @Transactional

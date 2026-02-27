@@ -39,7 +39,8 @@ public class PaymentService {
                 .orElseThrow(() -> new IllegalArgumentException("예약 정보 없음"));
 
         // 2. 만료시간 끝났는지 체크
-        if(LocalDateTime.now().isAfter(reservation.getExpiresAt()))
+        if(reservation.getStatus() == ReservationStatus.PENDING &&
+                LocalDateTime.now().isAfter(reservation.getExpiresAt()))
             throw new IllegalArgumentException("결제 시간 만료.");
 
         // 3. DB에 저장된 예약 금액과 요청받은 금액이 일치하는지 최종 검증
@@ -62,7 +63,7 @@ public class PaymentService {
                                BigDecimal pgAmount,
                                PaymentsStatus status) {
 
-        Payments payment = paymentRepository.findPaymentsByIdempotencyKey(idempotencyKey)
+        Payments payment = paymentRepository.findPaymentsByIdempotencyKeyAndStatus(idempotencyKey, PaymentsStatus.PENDING)
                 .orElseThrow(() -> new IllegalArgumentException("결제 시도 내역이 없음"));
 
         // PG사에서 실제 결제된 금액(pgAmount)과 우리 DB의 금액이 같은지 다시 확인

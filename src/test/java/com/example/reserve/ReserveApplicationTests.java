@@ -7,12 +7,16 @@ import com.example.reserve.entity.Events;
 import com.example.reserve.entity.Reservations;
 import com.example.reserve.entity.Seats;
 import com.example.reserve.job.NaiveJob;
+import com.example.reserve.job.SelectForUpdateJob;
+import com.example.reserve.job.SelectForUpdateSkipJob;
+import com.example.reserve.job.UpdateFirstJob;
 import com.example.reserve.model.AttemptResult;
 import com.example.reserve.repository.EventsRepository;
 import com.example.reserve.repository.ReservationsRepository;
 import com.example.reserve.repository.SeatsRepository;
 import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,6 +24,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.Rollback;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -45,37 +50,101 @@ class ReserveApplicationTests {
     @Autowired
     NaiveJob naiveJob;
     @Autowired
+    SelectForUpdateJob selectForUpdateJob;
+    @Autowired
+    SelectForUpdateSkipJob selectForUpdateSkipJob;
+    @Autowired
+    UpdateFirstJob updateFirstJob;
+    @Autowired
     JdbcTemplate jdbcTemplate;
 
+    @BeforeAll
+    static void setup() {
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+    }
+
+    private List<String> generateSeatNumbers() {
+        List<String> seats = new ArrayList<>();
+
+        for (int row = 1; row <= 20; row++) {
+            for (char col = 'A'; col <= 'F'; col++) {
+                seats.add(row + "-" + col);
+            }
+        }
+
+        return seats;
+    }
 
     private final UUID eventId = UUID.fromString("628032ff-77fa-49a4-a9b9-0f588ac94f32");
+
+
+    @Test
+    void generate_expired_seat() throws Exception {
+
+        List<String> seats = new ArrayList<>();
+
+        for (int row = 21; row <= 40; row++) {
+            for (char col = 'A'; col <= 'F'; col++) {
+                seats.add(row + "-" + col);
+            }
+        }
+
+        for (String seatNumber : seats) {
+
+            int threads = 500;
+            long t0 = System.nanoTime();
+            var before = innodbRowLockSnapshot();
+
+            var results = runRace(threads, () -> {
+                String userId = "u-" + Thread.currentThread().getId();
+                return reservationService.generateExpired(eventId, seatNumber, userId);
+            });
+
+//            var after = innodbRowLockSnapshot();
+//            printDiff("pessimistic_lock_" + seatNumber, before, after);
+//
+//            long tookMs = (System.nanoTime() - t0) / 1_000_000;
+//            System.out.println("seat=" + seatNumber + " total=" + tookMs);
+//
+//            printSummary("pessimistic_lock_" + seatNumber, results);
+//            verifyDbState(eventId, seatNumber);
+        }
+    }
+
     @Test
     void race_pessimistic_lock() throws Exception {
 
 
-        String seatNumber = "19-A";
+//        String seatNumber = "1-A";
+        List<String> seats = generateSeatNumbers();
 
-        int threads = 500;
-        long t0 = System.nanoTime();
-        var before = innodbRowLockSnapshot();
+        for (String seatNumber : seats) {
 
-        var results = runRace(threads, () -> {
-            String userId = "u-" + Thread.currentThread().getId();
-            return reservationService.generateReservation(eventId, seatNumber, userId);
-        });
+            int threads = 500;
+            long t0 = System.nanoTime();
+            var before = innodbRowLockSnapshot();
 
-        var after = innodbRowLockSnapshot();
-        printDiff("pessimistic_lock", before, after);
+            var results = runRace(threads, () -> {
+                String userId = "u-" + Thread.currentThread().getId();
+                return reservationService.generateReservation(eventId, seatNumber, userId);
+            });
 
-        long tookMs = (System.nanoTime() - t0) / 1_000_000;
-        System.out.println( "pessimistic_lock , total : " + tookMs);
-        printSummary("pessimistic_lock", results);
-        verifyDbState(eventId, seatNumber);
+            var after = innodbRowLockSnapshot();
+            printDiff("pessimistic_lock_" + seatNumber, before, after);
+
+            long tookMs = (System.nanoTime() - t0) / 1_000_000;
+            System.out.println("seat=" + seatNumber + " total=" + tookMs);
+
+            printSummary("pessimistic_lock_" + seatNumber, results);
+            verifyDbState(eventId, seatNumber);
+        }
     }
 
+    // 이건 가장 위험, lost update로 seat은 한개만 잡거나 event available 도 같게 수정되었을지 몰라도
+    // reservation이 success 만큼 생성, seat 에서 잡은 user 와 reservation 의 user 차이 발생
     @Test
     void race_no_lock() throws Exception {
-        String seatNumber = "31-A";
+        String seatNumber = "2-A";
         int threads = 500;
 
         long t0 = System.nanoTime();
@@ -99,7 +168,7 @@ class ReserveApplicationTests {
 
     @Test
     void race_atomic_update() throws Exception {
-        String seatNumber = "32-A";
+        String seatNumber = "3-A";
         int threads = 500;
         long t0 = System.nanoTime();
         var before = innodbRowLockSnapshot();
@@ -119,9 +188,11 @@ class ReserveApplicationTests {
         verifyDbState(eventId, seatNumber);
     }
 
+    // version 필수
+    // version 주석 후 테스트 결과 no lock 이랑 동일하게 동작
     @Test
     void race_optimistic() throws Exception {
-        String seatNumber = "33-A";
+        String seatNumber = "5-A";
         int threads = 500;
         long t0 = System.nanoTime();
 
@@ -144,6 +215,14 @@ class ReserveApplicationTests {
 
     // ========= schedule job ================
 
+    // 여기서 version 을 사용하나 안하냐에 따라서 갈림
+    // version을 사용 안한경우 동시에 여러개의 스레드가 접근해서 수정
+    // 근데 결과를 보면 여러개의 스레드가 동시에 접근해서 수정한것 같지 않은것도 있는데 그건 lost update 때문
+    // 원자적 update로 수정해서 보면 available seat의 개수가 접근 한 횟수만큼 늘어나있음
+    // version을 사용한 결과 모든 스레드가 접근하지만 실질적으로 update가 가능한건 1개뿐이고 나머지는 fail 발생
+    // 그래서 하나의 스레드만 동작해서 안전하게 처리
+    // 하지만 스케줄러 처리 같은 경우에서는 성능이 떨어짐, 하나가 실피하면 다른 스레드들은 다른 스레드가 선점하지 않은
+    // 작업을 잡아야 되는데 lock이 된 걸 같이 잡아서 처리 못함
     @Test
     void naive_schedule() throws Exception {
         int threads = 5;
@@ -172,6 +251,236 @@ class ReserveApplicationTests {
 
         verifyScheduleState( ids );
     }
+
+    // 동시에 접근 할 경우
+    @Test
+    void select_for_update_schedule() throws Exception {
+        int threads = 5;
+        long t0 = System.nanoTime();
+        var before = innodbRowLockSnapshot();
+
+        var results = runScheduleRace(threads,
+                (idx, workerId) -> selectForUpdateJob.runOnce(3, workerId)
+        );
+        var after = innodbRowLockSnapshot();
+        printDiff("select_for_update", before, after);
+
+        long tookMs = (System.nanoTime() - t0) / 1_000_000;
+
+        System.out.println( "select_for_update_schedule , total : " + tookMs);
+        printSummary("select_for_update_schedule", results);
+
+        List<UUID> ids =
+                results.stream()
+                        .filter(AttemptResult::success)
+                        .flatMap(res -> Arrays.stream(res.reservationId().split(","))) // Stream<String>
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .map(UUID::fromString)   // 여기서 UUID 파싱
+                        .toList();
+
+        verifyScheduleState( ids );
+    }
+
+    @Test
+    void select_for_update_skip_schedule() throws Exception {
+        int threads = 5;
+        long t0 = System.nanoTime();
+        var before = innodbRowLockSnapshot();
+
+        var results = runScheduleRace(threads,
+                (idx, workerId) -> selectForUpdateSkipJob.runOnce(20, workerId)
+        );
+        var after = innodbRowLockSnapshot();
+        printDiff("select_for_update_skip", before, after);
+
+        long tookMs = (System.nanoTime() - t0) / 1_000_000;
+
+        System.out.println( "select_for_update_skip_schedule , total : " + tookMs);
+        printSummary("select_for_update_skip_schedule", results);
+
+        List<UUID> ids =
+                results.stream()
+                        .filter(AttemptResult::success)
+                        .flatMap(res -> Arrays.stream(res.reservationId().split(","))) // Stream<String>
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .map(UUID::fromString)   // 여기서 UUID 파싱
+                        .toList();
+
+        verifyScheduleState( ids );
+
+        printScheduleMetrics("skip_once", tookMs, results);
+    }
+
+    @Test
+    void select_for_update_skip_batch_schedule() throws Exception {
+        int threads = 5;
+        long t0 = System.nanoTime();
+        var before = innodbRowLockSnapshot();
+
+        var results = runScheduleRace(threads,
+                (idx, workerId) -> selectForUpdateSkipJob.runMulti(8, workerId)
+        );
+        var after = innodbRowLockSnapshot();
+        printDiff("select_for_update_skip_batch", before, after);
+
+        long tookMs = (System.nanoTime() - t0) / 1_000_000;
+
+        System.out.println( "select_for_update_skip_batch_schedule , total : " + tookMs);
+        printSummary("select_for_update_skip_batch_schedule", results);
+
+        List<UUID> ids =
+                results.stream()
+                        .filter(AttemptResult::success)
+                        .flatMap(res -> Arrays.stream(res.reservationId().split(","))) // Stream<String>
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .map(UUID::fromString)   // 여기서 UUID 파싱
+                        .toList();
+
+        verifyScheduleState( ids );
+
+        printScheduleMetrics("skip_batch", tookMs, results);
+    }
+
+    @Test
+    void claim_update_schedule() throws Exception {
+        int threads = 5;
+        long t0 = System.nanoTime();
+        var before = innodbRowLockSnapshot();
+
+        var results = runScheduleRace(threads,
+                (idx, workerId) -> updateFirstJob.runOnce(3, workerId)
+        );
+        var after = innodbRowLockSnapshot();
+        printDiff("claim_update", before, after);
+
+        long tookMs = (System.nanoTime() - t0) / 1_000_000;
+
+        System.out.println( "claim_update_schedule , total : " + tookMs);
+        printSummary("claim_update_schedule", results);
+
+        List<UUID> ids =
+                results.stream()
+                        .filter(AttemptResult::success)
+                        .flatMap(res -> Arrays.stream(res.reservationId().split(","))) // Stream<String>
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .map(UUID::fromString)   // 여기서 UUID 파싱
+                        .toList();
+
+        verifyScheduleState( ids );
+    }
+
+    // ============== 결제 테스트 ================
+
+    @Test
+    void concurrent_payments_each_thread_has_own_reservation() throws Exception {
+        int users = 50;
+
+
+        List<TestCase> cases = new ArrayList<>();
+        for (int i = 0; i < users; i++) {
+            String userId = "u-" + i;
+            String seatNumber = "1-" + (char)('A' + (i % 20)) + "-" + i; // 예시(좌석 규칙에 맞게)
+            BigDecimal amount = new BigDecimal("10000");
+
+            UUID reservationId = seedReservedReservationForUser(userId, seatNumber, amount,
+                    LocalDateTime.now().plusSeconds(10)); // expiresAt 여유
+
+            String idemKey = "idem-" + userId + "-" + UUID.randomUUID();
+
+            cases.add(new TestCase(userId, reservationId, amount, idemKey));
+        }
+
+        ExecutorService pool = Executors.newFixedThreadPool(20);
+
+        // 1) requestPayment 동시 실행
+        runConcurrent(pool, users, idx -> {
+            TestCase tc = cases.get(idx);
+            paymentService.requestPayment(tc.reservationId(), tc.amount(), tc.idemKey());
+        });
+
+        // 2) PG 처리 시간 가정
+        Thread.sleep(300);
+
+        // 3) processPayment 동시 실행 (성공/실패 섞기)
+        runConcurrent(pool, users, idx -> {
+            TestCase tc = cases.get(idx);
+
+            boolean success = (idx % 5 != 0); // 80% 성공 예시
+            PaymentsStatus status = success ? PaymentsStatus.SUCCESS : PaymentsStatus.FAILED;
+            BigDecimal pgAmount = success ? tc.amount() : tc.amount().add(BigDecimal.ONE);
+
+            try {
+                paymentService.processPayment(
+                        "pg-" + UUID.randomUUID(),
+                        tc.idemKey(),
+                        pgAmount,
+                        status
+                );
+            } catch (Exception ignored) {
+                // 실패 케이스는 의도적이면 무시
+            }
+        });
+
+        pool.shutdown();
+
+        // 4) 검증: 각 reservation 상태/seat 상태/결제 상태 확인
+        long successCnt = 0;
+        long failedCnt = 0;
+
+        for (TestCase tc : cases) {
+            Payments p = paymentRepository.findPaymentsByIdempotencyKey(tc.idemKey()).orElseThrow();
+            Reservations r = reservationsRepository.findById(tc.reservationId()).orElseThrow();
+
+            if (p.getStatus() == PaymentsStatus.SUCCESS) {
+                successCnt++;
+                // 성공이면 확정 상태여야 함
+                assertEquals(ReservationStatus.CONFIRMED, r.getStatus());
+                assertEquals(SeatStatus.CONFIRMED, r.getSeats().getSeatStatus());
+            } else {
+                failedCnt++;
+                // 실패면 정책에 따라 PENDING 유지/취소 등 확인
+                // assertEquals(ReservationStatus.PENDING, r.getStatus());
+            }
+        }
+
+        System.out.println("payment success=" + successCnt + ", failed=" + failedCnt);
+    }
+
+    private void runConcurrent(ExecutorService pool, int tasks, ThrowingIntConsumer action) throws Exception {
+        CountDownLatch ready = new CountDownLatch(tasks);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done  = new CountDownLatch(tasks);
+
+        for (int i = 0; i < tasks; i++) {
+            final int idx = i;
+            pool.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    action.accept(idx);
+                } finally {
+                    done.countDown();
+                }
+                return null;
+            });
+        }
+
+        ready.await();
+        start.countDown();
+        done.await();
+    }
+
+    @FunctionalInterface
+    interface ThrowingIntConsumer {
+        void accept(int idx) throws Exception;
+    }
+
+    record TestCase(String userId, UUID reservationId, BigDecimal amount, String idemKey) {}
+
 
     // ===== 결과 출력 =====
 
@@ -247,8 +556,6 @@ class ReserveApplicationTests {
     @Rollback(false)
     void initSeats() {
 
-        UUID eventId = eventService.getEventId();
-        System.out.println(eventId);
         seatService.makeSeat( eventId );
     }
 
@@ -375,6 +682,48 @@ class ReserveApplicationTests {
             long a = e.getValue();
             System.out.printf("%s: before=%d after=%d diff=%d%n", e.getKey(), b, a, (a - b));
         }
+    }
+
+    private void printScheduleMetrics(String label, long tookMs, List<AttemptResult> results) {
+
+        // 성공한 reservationId(콤마 문자열)에서 총 처리 건수 집계
+        long processed = results.stream()
+                .filter(AttemptResult::success)
+                .map(AttemptResult::reservationId)
+                .filter(Objects::nonNull)
+                .flatMap(s -> Arrays.stream(s.split(",")))
+                .map(String::trim)
+                .filter(x -> !x.isEmpty())
+                .count();
+
+        long successThreads = results.stream().filter(AttemptResult::success).count();
+        long failThreads = results.size() - successThreads;
+
+        // latency stats
+        List<Long> latencies = results.stream()
+                .filter(AttemptResult::success)
+                .map(AttemptResult::tookMs)
+                .sorted()
+                .toList();
+
+        long avg = latencies.isEmpty() ? 0 : (long) latencies.stream().mapToLong(x -> x).average().orElse(0);
+        long p95 = percentile(latencies, 95);
+        long p99 = percentile(latencies, 99);
+        long max = latencies.isEmpty() ? 0 : latencies.get(latencies.size() - 1);
+
+        double throughput = tookMs == 0 ? 0 : (processed * 1000.0 / tookMs);
+
+        System.out.printf(
+                "[%s] tookMs=%d, threads ok=%d fail=%d, processed=%d, throughput=%.2f/s, avg=%dms p95=%dms p99=%dms max=%dms%n",
+                label, tookMs, successThreads, failThreads, processed, throughput, avg, p95, p99, max
+        );
+    }
+
+    private long percentile(List<Long> sorted, int p) {
+        if (sorted == null || sorted.isEmpty()) return 0;
+        int idx = (int) Math.ceil((p / 100.0) * sorted.size()) - 1;
+        idx = Math.max(0, Math.min(idx, sorted.size() - 1));
+        return sorted.get(idx);
     }
 
 

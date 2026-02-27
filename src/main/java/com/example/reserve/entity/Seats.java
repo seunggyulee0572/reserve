@@ -32,6 +32,7 @@ public class Seats {
     private LocalDateTime reservedAt;
     private String reservedBy;
     private BigDecimal basePrice;
+    private String grade;
 //    @Version
 //    private Integer version;
 
