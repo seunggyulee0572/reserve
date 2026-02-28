@@ -1,6 +1,7 @@
 package com.example.reserve.repository;
 
 import com.example.reserve.entity.Reservations;
+import com.example.reserve.model.dto.ReservationForPayment;
 import com.example.reserve.model.dto.ReservationRefs;
 import com.example.reserve.model.enums.ReservationStatus;
 import jakarta.transaction.Transactional;
@@ -13,6 +14,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ReservationsRepository extends JpaRepository<Reservations, UUID> {
@@ -23,7 +25,27 @@ public interface ReservationsRepository extends JpaRepository<Reservations, UUID
                                                       ReservationStatus status,
                                                       LocalDateTime now);
 
-//    @Query(value = """
+    Optional<Reservations> findReservationsBySeats_SeatNumberAndStatus( String seatNumber, ReservationStatus status );
+
+    @Query(value =
+            "SELECT BIN_TO_UUID(r.id) AS reservationId, " +
+                    "       BIN_TO_UUID(s.id) AS seatId, " +
+                    "       s.seat_number AS seatNumber, " +
+                    "       r.user_id AS userId, " +
+                    "       r.total_amount AS totalAmount " +
+                    "FROM reservations r " +
+                    "JOIN seats s ON r.seat_id = s.id " +
+                    "WHERE r.event_id = :eventId " +
+                    "  AND r.status = :status " +
+                    "  AND r.expires_at > NOW() " +     // ✅ now 파라미터 제거
+                    "LIMIT :limit",
+            nativeQuery = true)
+    List<ReservationForPayment> findActiveReservationsNative(
+            @Param("eventId") UUID eventId,     // ✅ UUID로
+            @Param("status") String status,     // (가능하면 enum으로)
+            @Param("limit") int limit
+    );
+    //    @Query(value = """
 //                SELECT r.id FROM reservations r
 //                WHERE r.status = 'PENDING' AND r.expires_at < NOW()
 //                ORDER BY r.expires_at ASC

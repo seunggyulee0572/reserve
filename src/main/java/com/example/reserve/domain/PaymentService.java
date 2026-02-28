@@ -8,8 +8,9 @@ import com.example.reserve.model.enums.SeatStatus;
 import com.example.reserve.repository.PaymentRepository;
 import com.example.reserve.repository.ReservationsRepository;
 import com.example.reserve.repository.SeatsRepository;
-import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -28,7 +29,7 @@ public class PaymentService {
         this.reservationsRepository = reservationsRepository;
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void requestPayment(UUID reservationId, BigDecimal amount, String idempotencyKey) {
         // 1. 이미 해당 멱등성 키로 저장된 결제 시도가 있는지 확인 (중복 요청 방지)
         if (paymentRepository.existsPaymentsByIdempotencyKey(idempotencyKey)) {
@@ -54,7 +55,7 @@ public class PaymentService {
         payments.setStatus(PaymentsStatus.PENDING);
         payments.setIdempotencyKey(idempotencyKey);
 
-        paymentRepository.save(payments);
+        paymentRepository.saveAndFlush(payments);
     }
 
     @Transactional
@@ -80,5 +81,13 @@ public class PaymentService {
             payment.getReservation().setStatus(ReservationStatus.CONFIRMED);
             payment.getReservation().getSeats().setSeatStatus(SeatStatus.CONFIRMED);
         }
+    }
+
+    @Transactional
+    public Payments findPaymentByIdemKey( String idemKey){
+
+       return paymentRepository.findPaymentsByIdempotencyKey( idemKey)
+                .orElseThrow( () -> new IllegalArgumentException(idemKey + " no"));
+
     }
 }

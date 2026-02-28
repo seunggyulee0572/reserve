@@ -97,11 +97,11 @@ public class SelectForUpdateSkipJob implements ExpireRecoveryJob{
 
         for (ReservationRefs ref : refs) {
 
-            try {
-                Thread.sleep(300);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
+//            try {
+//                Thread.sleep(300);
+//            } catch (InterruptedException e) {
+//                throw new RuntimeException(e);
+//            }
 
             int seatRestored = seatsRepository.restoreSeatIfMatches(ref.getSeatId(), ref.getUserId());
             if (seatRestored == 1) {

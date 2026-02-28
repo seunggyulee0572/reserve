@@ -3,6 +3,8 @@ package com.example.reserve.domain;
 import com.example.reserve.entity.Events;
 import com.example.reserve.entity.Reservations;
 import com.example.reserve.entity.Seats;
+import com.example.reserve.model.dto.ForPayment;
+import com.example.reserve.model.dto.ReservationForPayment;
 import com.example.reserve.model.enums.ReservationStatus;
 import com.example.reserve.model.enums.SeatStatus;
 import com.example.reserve.repository.EventsRepository;
@@ -11,7 +13,11 @@ import com.example.reserve.repository.SeatsRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -225,6 +231,27 @@ public class ReservationService {
         reservationsRepository.save(r);
 
         return r.getId();
+    }
+
+    @Transactional
+    public ForPayment getForPayment(String seatNumber) {
+
+        Reservations reservations = reservationsRepository.findReservationsBySeats_SeatNumberAndStatus(seatNumber, ReservationStatus.PENDING)
+                .orElseThrow(() -> new IllegalArgumentException("no reservation for payment"));
+
+
+        return new ForPayment( reservations.getId(), reservations.getSeats().getId(), reservations.getUserId() ,reservations.getTotalAmount());
+
+    }
+
+    @Transactional
+    public List<ReservationForPayment> getReservedSeat(UUID eventId, int limit ) {
+        return reservationsRepository.findActiveReservationsNative(
+                eventId,
+                ReservationStatus.PENDING.name(),
+                limit);
+
+
     }
 
 

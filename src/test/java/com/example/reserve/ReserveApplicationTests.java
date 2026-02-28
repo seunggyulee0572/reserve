@@ -1,9 +1,11 @@
 package com.example.reserve;
 
 import com.example.reserve.domain.EventService;
+import com.example.reserve.domain.PaymentService;
 import com.example.reserve.domain.ReservationService;
 import com.example.reserve.domain.SeatService;
 import com.example.reserve.entity.Events;
+import com.example.reserve.entity.Payments;
 import com.example.reserve.entity.Reservations;
 import com.example.reserve.entity.Seats;
 import com.example.reserve.job.NaiveJob;
@@ -11,6 +13,11 @@ import com.example.reserve.job.SelectForUpdateJob;
 import com.example.reserve.job.SelectForUpdateSkipJob;
 import com.example.reserve.job.UpdateFirstJob;
 import com.example.reserve.model.AttemptResult;
+import com.example.reserve.model.dto.ForPayment;
+import com.example.reserve.model.dto.ReservationForPayment;
+import com.example.reserve.model.enums.PaymentsStatus;
+import com.example.reserve.model.enums.ReservationStatus;
+import com.example.reserve.model.enums.SeatStatus;
 import com.example.reserve.repository.EventsRepository;
 import com.example.reserve.repository.ReservationsRepository;
 import com.example.reserve.repository.SeatsRepository;
@@ -25,12 +32,12 @@ import org.springframework.test.annotation.Rollback;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest
 class ReserveApplicationTests {
@@ -47,6 +54,8 @@ class ReserveApplicationTests {
     SeatService seatService;
     @Autowired
     ReservationsRepository reservationsRepository;
+    @Autowired
+    PaymentService paymentService;
     @Autowired
     NaiveJob naiveJob;
     @Autowired
@@ -320,7 +329,7 @@ class ReserveApplicationTests {
         var before = innodbRowLockSnapshot();
 
         var results = runScheduleRace(threads,
-                (idx, workerId) -> selectForUpdateSkipJob.runMulti(8, workerId)
+                (idx, workerId) -> selectForUpdateSkipJob.runMulti(40, workerId)
         );
         var after = innodbRowLockSnapshot();
         printDiff("select_for_update_skip_batch", before, after);
@@ -377,24 +386,19 @@ class ReserveApplicationTests {
 
     @Test
     void concurrent_payments_each_thread_has_own_reservation() throws Exception {
-        int users = 50;
-
-
+        int users = 20;
         List<TestCase> cases = new ArrayList<>();
-        for (int i = 0; i < users; i++) {
-            String userId = "u-" + i;
-            String seatNumber = "1-" + (char)('A' + (i % 20)) + "-" + i; // 예시(좌석 규칙에 맞게)
-            BigDecimal amount = new BigDecimal("10000");
 
-            UUID reservationId = seedReservedReservationForUser(userId, seatNumber, amount,
-                    LocalDateTime.now().plusSeconds(10)); // expiresAt 여유
+        List<ReservationForPayment> reservedSeat = reservationService.getReservedSeat(eventId, users);
 
-            String idemKey = "idem-" + userId + "-" + UUID.randomUUID();
+        for (ReservationForPayment res : reservedSeat) {
 
-            cases.add(new TestCase(userId, reservationId, amount, idemKey));
+            String idemKey = "idem-" + res.getUserId() + "-" + UUID.randomUUID();
+            cases.add(new TestCase(res.getUserId(), res.getReservationId(), res.getTotalAmount(), idemKey));
+
         }
 
-        ExecutorService pool = Executors.newFixedThreadPool(20);
+        ExecutorService pool = Executors.newFixedThreadPool(users);
 
         // 1) requestPayment 동시 실행
         runConcurrent(pool, users, idx -> {
@@ -432,7 +436,7 @@ class ReserveApplicationTests {
         long failedCnt = 0;
 
         for (TestCase tc : cases) {
-            Payments p = paymentRepository.findPaymentsByIdempotencyKey(tc.idemKey()).orElseThrow();
+            Payments p = paymentService.findPaymentByIdemKey(tc.idemKey());
             Reservations r = reservationsRepository.findById(tc.reservationId()).orElseThrow();
 
             if (p.getStatus() == PaymentsStatus.SUCCESS) {

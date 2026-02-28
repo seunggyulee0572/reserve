@@ -11,5 +11,7 @@ public interface PaymentRepository extends JpaRepository<Payments, UUID> {
 
     Optional<Payments> findPaymentsByIdempotencyKeyAndStatus(String idemPotencyKey, PaymentsStatus status);
 
+    Optional<Payments> findPaymentsByIdempotencyKey(String idemPotencyKey);
+
     Boolean existsPaymentsByIdempotencyKey( String IdempotencyKey);
 }
