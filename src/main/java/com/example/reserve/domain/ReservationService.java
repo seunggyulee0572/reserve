@@ -36,6 +36,7 @@ public class ReservationService {
     // todo : token에서 user 가져옴
     @Transactional
     public UUID generateReservation(UUID eventId, String seatNumber, String userId) {
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("UTC"));
 
         Seats seat = seatsRepository.findForUpdate(eventId, seatNumber)
                 .orElseThrow(() -> new IllegalArgumentException("seat not found"));
@@ -62,8 +63,8 @@ public class ReservationService {
         r.setEvent(event);
         r.setSeats(seat);
         r.setStatus(ReservationStatus.PENDING);
-        r.setCreatedAt(LocalDateTime.now());
-        r.setExpiresAt(LocalDateTime.now().plusDays(1));
+        r.setCreatedAt(now);
+        r.setExpiresAt(now.plusDays(1));
         r.setUserId(userId);
         r.setTotalAmount(seat.getBasePrice());
 
@@ -75,6 +76,7 @@ public class ReservationService {
 
     @Transactional
     public UUID generateReservationNoLock(UUID eventId, String seatNumber, String userId) {
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("UTC"));
 
         Seats seat = seatsRepository.findByEvent_IdAndSeatNumberAndSeatStatus(eventId, seatNumber, SeatStatus.AVAILABLE)
                 .orElseThrow(() -> new IllegalArgumentException("seat not found"));
@@ -104,9 +106,9 @@ public class ReservationService {
         r.setSeats(seat);
         r.setUserId(userId);
         r.setStatus(ReservationStatus.PENDING);
-        r.setCreatedAt(LocalDateTime.now());
-        r.setExpiresAt(LocalDateTime.now().plusMinutes(5));
-        r.setUpdatedAt(LocalDateTime.now());
+        r.setCreatedAt(now);
+        r.setExpiresAt(now.plusMinutes(5));
+        r.setUpdatedAt(now);
         r.setTotalAmount(seat.getBasePrice());
 
         reservationsRepository.saveAndFlush(r);
@@ -117,7 +119,7 @@ public class ReservationService {
     @Transactional
     public UUID generateReservationAtomicUpdate(UUID eventId, String seatNumber, String userId) {
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("UTC"));
 
         int rowCount = seatsRepository.reserveIfAvailable(eventId, seatNumber, userId, now);
 
@@ -158,7 +160,7 @@ public class ReservationService {
     @Transactional
     public UUID generateExpired(UUID eventId, String seatNumber, String userId) {
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("UTC"));
 
         int rowCount = seatsRepository.reserveIfAvailable(eventId, seatNumber, userId, now);
 
@@ -198,7 +200,7 @@ public class ReservationService {
     @Transactional
     public UUID generateReservationOptimistic(UUID eventId, String seatNumber, String userId) {
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("UTC"));
 
         Seats seat = seatsRepository.findByEvent_IdAndSeatNumberAndSeatStatus(eventId, seatNumber, SeatStatus.AVAILABLE)
                 .orElseThrow(() -> new IllegalArgumentException("sold out"));
@@ -223,8 +225,8 @@ public class ReservationService {
         r.setEvent(event);
         r.setSeats(afterSeat);
         r.setStatus(ReservationStatus.PENDING);
-        r.setCreatedAt(LocalDateTime.now());
-        r.setExpiresAt(LocalDateTime.now().plusMinutes(5));
+        r.setCreatedAt(now);
+        r.setExpiresAt(now.plusMinutes(5));
         r.setUserId(userId);
         r.setTotalAmount(seat.getBasePrice());
 

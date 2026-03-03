@@ -5,6 +5,7 @@ import com.example.reserve.entity.Reservations;
 import com.example.reserve.model.enums.PaymentsStatus;
 import com.example.reserve.model.enums.ReservationStatus;
 import com.example.reserve.model.enums.SeatStatus;
+import com.example.reserve.repository.EventsRepository;
 import com.example.reserve.repository.PaymentRepository;
 import com.example.reserve.repository.ReservationsRepository;
 import com.example.reserve.repository.SeatsRepository;
@@ -22,10 +23,13 @@ import java.util.UUID;
 public class PaymentService {
 
     private final PaymentRepository paymentRepository;
+    private final EventsRepository eventsRepository;
     private final ReservationsRepository reservationsRepository;
     public PaymentService(PaymentRepository paymentRepository,
+                          EventsRepository eventsRepository,
                           ReservationsRepository reservationsRepository) {
         this.paymentRepository = paymentRepository;
+        this.eventsRepository = eventsRepository;
         this.reservationsRepository = reservationsRepository;
     }
 
@@ -58,7 +62,7 @@ public class PaymentService {
         paymentRepository.saveAndFlush(payments);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void processPayment(String paymentKey,
                                String idempotencyKey,
                                BigDecimal pgAmount,
@@ -71,7 +75,8 @@ public class PaymentService {
         if (payment.getAmount().compareTo(pgAmount) != 0) {
 
             payment.setStatus(PaymentsStatus.FAILED);
-            throw new IllegalArgumentException("결제 금액과 요청한 금액이 다릅니다.");
+            System.out.println("결제 금액과 요청한 금액이 다릅니다.");
+            return;
         }
 
         payment.setPaymentKey(paymentKey);
@@ -80,14 +85,41 @@ public class PaymentService {
         if (status == PaymentsStatus.SUCCESS) {
             payment.getReservation().setStatus(ReservationStatus.CONFIRMED);
             payment.getReservation().getSeats().setSeatStatus(SeatStatus.CONFIRMED);
+
         }
     }
 
     @Transactional
-    public Payments findPaymentByIdemKey( String idemKey){
+    public Payments findPaymentByIdemKey( String idemKey ){
 
-       return paymentRepository.findPaymentsByIdempotencyKey( idemKey)
+       return paymentRepository.findPaymentsByIdempotencyKey( idemKey )
                 .orElseThrow( () -> new IllegalArgumentException(idemKey + " no"));
 
     }
+
+    @Transactional(readOnly = true)
+    public PaymentDetailView getPaymentDetailForVerification(String idemKey, UUID reservationId) {
+        // 1) Payment 조회
+        Payments p = paymentRepository.findPaymentsByIdempotencyKey( idemKey )
+                .orElseThrow(() -> new RuntimeException("Payment not found for key: " + idemKey));
+
+        // 2) Reservation 조회 (이때 Seats도 함께 사용되므로 트랜잭션 내에서 접근)
+        Reservations r = reservationsRepository.findById(reservationId)
+                .orElseThrow(() -> new RuntimeException("Reservation not found for id: " + reservationId));
+
+        // 3) 검증에 필요한 데이터들을 DTO에 담아서 반환
+        // (Seats의 상태를 호출함으로써 강제 초기화 발생)
+        return new PaymentDetailView(
+                p.getStatus(),
+                r.getStatus(),
+                r.getSeats().getSeatStatus()
+        );
+    }
+
+    // 검증용 간단한 DTO (Record 사용 추천)
+    public record PaymentDetailView(
+            PaymentsStatus paymentStatus,
+            ReservationStatus reservationStatus,
+            SeatStatus seatStatus
+    ) {}
 }

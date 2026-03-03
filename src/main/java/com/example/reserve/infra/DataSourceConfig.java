@@ -64,7 +64,7 @@ public class DataSourceConfig {
         jpaProps.put("hibernate.hbm2ddl.auto", "none");          // validate / update / create / none
         jpaProps.put("hibernate.dialect", "org.hibernate.dialect.MySQLDialect");
         jpaProps.put("hibernate.format_sql", "true");
-        jpaProps.put("hibernate.jdbc.time_zone", "Asia/Seoul");
+        jpaProps.put("hibernate.jdbc.time_zone", "UTC");
 
         jpaProps.put("hibernate.jdbc.batch_size", 100);
         jpaProps.put("hibernate.order_inserts", true);

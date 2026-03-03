@@ -86,6 +86,13 @@ class ReserveApplicationTests {
 
     private final UUID eventId = UUID.fromString("628032ff-77fa-49a4-a9b9-0f588ac94f32");
 
+    @Test
+    @Transactional
+    @Rollback(false)
+    void initSeats() {
+
+        seatService.makeSeat( eventId );
+    }
 
     @Test
     void generate_expired_seat() throws Exception {
@@ -403,7 +410,11 @@ class ReserveApplicationTests {
         // 1) requestPayment 동시 실행
         runConcurrent(pool, users, idx -> {
             TestCase tc = cases.get(idx);
-            paymentService.requestPayment(tc.reservationId(), tc.amount(), tc.idemKey());
+            try {
+                paymentService.requestPayment(tc.reservationId(), tc.amount(), tc.idemKey());
+            } catch (Exception e) {
+                System.out.println("requestPayment 실패 idx=" + idx + " : " + e.getMessage());
+            }
         });
 
         // 2) PG 처리 시간 가정
@@ -424,8 +435,8 @@ class ReserveApplicationTests {
                         pgAmount,
                         status
                 );
-            } catch (Exception ignored) {
-                // 실패 케이스는 의도적이면 무시
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
             }
         });
 
@@ -436,18 +447,18 @@ class ReserveApplicationTests {
         long failedCnt = 0;
 
         for (TestCase tc : cases) {
-            Payments p = paymentService.findPaymentByIdemKey(tc.idemKey());
-            Reservations r = reservationsRepository.findById(tc.reservationId()).orElseThrow();
+            // 서비스에서 한 번에 묶어서 조회해온 데이터를 받음
+            PaymentService.PaymentDetailView detail = paymentService.getPaymentDetailForVerification(tc.idemKey(), tc.reservationId());
 
-            if (p.getStatus() == PaymentsStatus.SUCCESS) {
+            if (detail.paymentStatus() == PaymentsStatus.SUCCESS) {
                 successCnt++;
                 // 성공이면 확정 상태여야 함
-                assertEquals(ReservationStatus.CONFIRMED, r.getStatus());
-                assertEquals(SeatStatus.CONFIRMED, r.getSeats().getSeatStatus());
+                assertEquals(ReservationStatus.CONFIRMED, detail.reservationStatus());
+                assertEquals(SeatStatus.CONFIRMED, detail.seatStatus());
             } else {
                 failedCnt++;
-                // 실패면 정책에 따라 PENDING 유지/취소 등 확인
-                // assertEquals(ReservationStatus.PENDING, r.getStatus());
+                // 실패 시 로직 검증 (예: PENDING 유지 등)
+                // assertEquals(ReservationStatus.PENDING, detail.reservationStatus());
             }
         }
 
@@ -476,6 +487,172 @@ class ReserveApplicationTests {
         ready.await();
         start.countDown();
         done.await();
+    }
+
+    @Test
+    void payment_and_scheduler_lock_contention() throws Exception {
+
+        int paymentUsers = 20;
+        int schedulerThreads = 5;
+
+        // 결제용 예약 데이터 준비
+        List<TestCase> cases = new ArrayList<>();
+        List<ReservationForPayment> reservedSeat = reservationService.getReservedSeat(eventId, paymentUsers);
+        for (ReservationForPayment res : reservedSeat) {
+            String idemKey = "idem-" + res.getUserId() + "-" + UUID.randomUUID();
+            cases.add(new TestCase(res.getUserId(), res.getReservationId(), res.getTotalAmount(), idemKey));
+        }
+
+        ExecutorService paymentPool = Executors.newFixedThreadPool(paymentUsers);
+        ExecutorService schedulerPool = Executors.newFixedThreadPool(schedulerThreads);
+
+        CountDownLatch ready = new CountDownLatch(paymentUsers + schedulerThreads);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(paymentUsers + schedulerThreads);
+
+        List<Long> paymentLatencies = new CopyOnWriteArrayList<>();
+        List<String> timeoutErrors = new CopyOnWriteArrayList<>();
+
+        // 결제 스레드 준비
+        for (int i = 0; i < paymentUsers; i++) {
+            final int idx = i;
+            paymentPool.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    long t0 = System.nanoTime();
+
+                    // requestPayment
+                    try {
+                        paymentService.requestPayment(
+                                cases.get(idx).reservationId(),
+                                cases.get(idx).amount(),
+                                cases.get(idx).idemKey()
+                        );
+                    } catch (Exception e) {
+                        System.out.println("requestPayment 실패 idx=" + idx + " : " + e.getMessage());
+                    }
+
+                    Thread.sleep(300); // PG 처리 시간 가정
+
+                    // processPayment
+                    boolean success = (idx % 5 != 0);
+                    PaymentsStatus status = success ? PaymentsStatus.SUCCESS : PaymentsStatus.FAILED;
+                    BigDecimal pgAmount = success
+                            ? cases.get(idx).amount()
+                            : cases.get(idx).amount().add(BigDecimal.ONE);
+
+                    try {
+                        paymentService.processPayment(
+                                "pg-" + UUID.randomUUID(),
+                                cases.get(idx).idemKey(),
+                                pgAmount,
+                                status
+                        );
+                        long latency = (System.nanoTime() - t0) / 1_000_000;
+                        paymentLatencies.add(latency);
+                        System.out.printf("[PAYMENT] idx=%d latency=%dms%n", idx, latency);
+                    } catch (Exception e) {
+                        timeoutErrors.add("payment-" + idx + ": " + e.getMessage());
+                        System.out.println("[PAYMENT ERROR] idx=" + idx + " : " + e.getMessage());
+                    }
+
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+                return null;
+            });
+        }
+
+        // 스케줄러 스레드 준비 (락을 오래 잡도록 의도)
+        var before = innodbRowLockSnapshot();
+        List<AttemptResult> scheduleResults = new CopyOnWriteArrayList<>();
+
+        for (int i = 0; i < schedulerThreads; i++) {
+            final int idx = i;
+            final String workerId = "w-" + idx;
+            schedulerPool.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    long st0 = System.nanoTime();
+
+                    List<UUID> reservationIds = selectForUpdateJob.runOnce(3, workerId);
+
+                    long tookMs = (System.nanoTime() - st0) / 1_000_000;
+                    scheduleResults.add(new AttemptResult(
+                            idx, true,
+                            String.join(",", reservationIds.stream().map(UUID::toString).toList()),
+                            null, null, tookMs
+                    ));
+                    System.out.printf("[SCHEDULER] worker=%s latency=%dms%n", workerId, tookMs);
+
+                } catch (Exception e) {
+                    scheduleResults.add(new AttemptResult(
+                            idx, false, null,
+                            e.getClass().getSimpleName(), e.getMessage(), 0
+                    ));
+                    System.out.println("[SCHEDULER ERROR] worker=" + workerId + " : " + e.getMessage());
+                } finally {
+                    done.countDown();
+                }
+                return null;
+            });
+        }
+
+        // 동시 출발
+        ready.await();
+        start.countDown();
+        done.await(30, TimeUnit.SECONDS); // 최대 30초 대기
+
+        var after = innodbRowLockSnapshot();
+        printDiff("payment_vs_scheduler", before, after);
+
+        paymentPool.shutdown();
+        schedulerPool.shutdown();
+
+        // ── 결과 분석 ──
+        System.out.println("\n=== 결과 분석 ===");
+        System.out.println("타임아웃/에러 건수: " + timeoutErrors.size());
+        timeoutErrors.forEach(System.out::println);
+
+        if (!paymentLatencies.isEmpty()) {
+            long avg = (long) paymentLatencies.stream().mapToLong(Long::longValue).average().orElse(0);
+            long max = paymentLatencies.stream().mapToLong(Long::longValue).max().orElse(0);
+            System.out.printf("결제 latency — 평균: %dms, 최대: %dms%n", avg, max);
+        }
+
+        // ── 상태 정합성 검증 ──
+        long successCnt = 0, failedCnt = 0;
+        for (TestCase tc : cases) {
+            try {
+                PaymentService.PaymentDetailView detail =
+                        paymentService.getPaymentDetailForVerification(tc.idemKey(), tc.reservationId());
+
+                if (detail.paymentStatus() == PaymentsStatus.SUCCESS) {
+                    successCnt++;
+                    assertEquals(ReservationStatus.CONFIRMED, detail.reservationStatus());
+                    assertEquals(SeatStatus.CONFIRMED, detail.seatStatus());
+                } else {
+                    failedCnt++;
+                }
+            } catch (Exception e) {
+                System.out.println("[검증 실패] " + tc.idemKey() + " : " + e.getMessage());
+            }
+        }
+        System.out.printf("payment success=%d, failed=%d%n", successCnt, failedCnt);
+
+        // 스케줄러 결과 검증
+        List<UUID> scheduledIds = scheduleResults.stream()
+                .filter(AttemptResult::success)
+                .flatMap(res -> Arrays.stream(res.reservationId().split(",")))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(UUID::fromString)
+                .toList();
+        verifyScheduleState(scheduledIds);
     }
 
     @FunctionalInterface
@@ -555,13 +732,7 @@ class ReserveApplicationTests {
         eventService.generateEvent();
     }
 
-    @Test
-    @Transactional
-    @Rollback(false)
-    void initSeats() {
 
-        seatService.makeSeat( eventId );
-    }
 
     private List<AttemptResult> runRace(int threads, Callable<UUID> action) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(threads);

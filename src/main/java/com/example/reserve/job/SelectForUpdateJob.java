@@ -39,11 +39,11 @@ public class SelectForUpdateJob implements ExpireRecoveryJob{
 
         List<UUID> processed = new ArrayList<>();
 
-        try {
-            Thread.sleep(3000);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
+//        try {
+//            Thread.sleep(3000);
+//        } catch (InterruptedException e) {
+//            throw new RuntimeException(e);
+//        }
 
         for (ReservationRefs ref : refs) {
             UUID res = ref.getReservationId();

@@ -37,12 +37,12 @@ public interface ReservationsRepository extends JpaRepository<Reservations, UUID
                     "JOIN seats s ON r.seat_id = s.id " +
                     "WHERE r.event_id = :eventId " +
                     "  AND r.status = :status " +
-                    "  AND r.expires_at > NOW() " +     // ✅ now 파라미터 제거
+                    "  AND r.expires_at > NOW(6) " +
                     "LIMIT :limit",
             nativeQuery = true)
     List<ReservationForPayment> findActiveReservationsNative(
-            @Param("eventId") UUID eventId,     // ✅ UUID로
-            @Param("status") String status,     // (가능하면 enum으로)
+            @Param("eventId") UUID eventId,
+            @Param("status") String status,
             @Param("limit") int limit
     );
     //    @Query(value = """
