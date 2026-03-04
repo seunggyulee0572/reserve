@@ -1,5 +1,6 @@
 package com.example.reserve.entity;
 
+import com.example.reserve.model.enums.FailureReason;
 import com.example.reserve.model.enums.PaymentsStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -28,6 +29,9 @@ public class Payments extends BaseEntity{
     private PaymentsStatus status;
     private String paymentKey;
     private String idempotencyKey;
+    @Enumerated(EnumType.STRING)
+    private FailureReason failureReason;
+    private Boolean retryable;
     private int retryCount;
     @LastModifiedDate
     private LocalDateTime updatedAt;

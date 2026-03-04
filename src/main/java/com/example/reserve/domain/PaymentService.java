@@ -2,6 +2,8 @@ package com.example.reserve.domain;
 
 import com.example.reserve.entity.Payments;
 import com.example.reserve.entity.Reservations;
+import com.example.reserve.event.producer.PaymentEventPublisher;
+import com.example.reserve.model.enums.FailureReason;
 import com.example.reserve.model.enums.PaymentsStatus;
 import com.example.reserve.model.enums.ReservationStatus;
 import com.example.reserve.model.enums.SeatStatus;
@@ -12,6 +14,8 @@ import com.example.reserve.repository.SeatsRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -22,12 +26,14 @@ import java.util.UUID;
 @Service
 public class PaymentService {
 
+    private final PaymentEventPublisher eventPublisher;
     private final PaymentRepository paymentRepository;
     private final EventsRepository eventsRepository;
     private final ReservationsRepository reservationsRepository;
-    public PaymentService(PaymentRepository paymentRepository,
+    public PaymentService(PaymentEventPublisher eventPublisher, PaymentRepository paymentRepository,
                           EventsRepository eventsRepository,
                           ReservationsRepository reservationsRepository) {
+        this.eventPublisher = eventPublisher;
         this.paymentRepository = paymentRepository;
         this.eventsRepository = eventsRepository;
         this.reservationsRepository = reservationsRepository;
@@ -66,16 +72,30 @@ public class PaymentService {
     public void processPayment(String paymentKey,
                                String idempotencyKey,
                                BigDecimal pgAmount,
-                               PaymentsStatus status) {
+                               PaymentsStatus status,
+                               FailureReason failureReason) {
 
-        Payments payment = paymentRepository.findPaymentsByIdempotencyKeyAndStatus(idempotencyKey, PaymentsStatus.PENDING)
+        Payments payment = paymentRepository
+                .findPaymentsByIdempotencyKeyAndStatus(idempotencyKey, PaymentsStatus.PENDING)
                 .orElseThrow(() -> new IllegalArgumentException("결제 시도 내역이 없음"));
 
-        // PG사에서 실제 결제된 금액(pgAmount)과 우리 DB의 금액이 같은지 다시 확인
+        // 금액 불일치 → 재시도 불가 FAILED
         if (payment.getAmount().compareTo(pgAmount) != 0) {
-
             payment.setStatus(PaymentsStatus.FAILED);
-            System.out.println("결제 금액과 요청한 금액이 다릅니다.");
+            payment.setFailureReason(FailureReason.AMOUNT_MISMATCH);
+            payment.setRetryable(false);
+            payment.getReservation().setStatus(ReservationStatus.CANCELLED);
+            payment.getReservation().getSeats().setSeatStatus(SeatStatus.AVAILABLE);
+
+            // 트랜잭션 커밋 후 이벤트 발행
+            TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            eventPublisher.publishPaymentFailed(payment, 0);
+                        }
+                    }
+            );
             return;
         }
 
@@ -86,7 +106,62 @@ public class PaymentService {
             payment.getReservation().setStatus(ReservationStatus.CONFIRMED);
             payment.getReservation().getSeats().setSeatStatus(SeatStatus.CONFIRMED);
 
+            TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            eventPublisher.publishPaymentCompleted(payment);
+                        }
+                    }
+            );
+
+        } else if (status == PaymentsStatus.FAILED) {
+            payment.setFailureReason(failureReason);
+            boolean retryable = failureReason == FailureReason.PG_ERROR
+                    || failureReason == FailureReason.TIMEOUT;
+            payment.setRetryable(retryable);
+
+            if (!retryable) {
+                // 재시도 불가 → 즉시 좌석 복구
+                payment.getReservation().setStatus(ReservationStatus.CANCELLED);
+                payment.getReservation().getSeats().setSeatStatus(SeatStatus.AVAILABLE);
+            }
+
+            TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            eventPublisher.publishPaymentFailed(payment, 0);
+                        }
+                    }
+            );
         }
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void retryPayment(UUID reservationId) {
+
+        // 재시도 가능한 FAILED 건만 대상
+        Payments failed = paymentRepository
+                .findRetryableFailedPayment(reservationId)  // retryable=true, status=FAILED
+                .orElseThrow(() -> new IllegalArgumentException("재시도 가능한 결제 없음"));
+
+        // 기존 FAILED는 그대로 두고 새 idemKey로 새 결제 시도 생성
+        String newIdemKey = "retry-" + reservationId + "-" + UUID.randomUUID();
+
+        Payments newPayment = new Payments();
+        newPayment.setAmount(failed.getAmount());
+        newPayment.setReservation(failed.getReservation());
+        newPayment.setStatus(PaymentsStatus.PENDING);
+        newPayment.setIdempotencyKey(newIdemKey);
+        newPayment.setRetryCount(failed.getRetryCount() + 1);
+
+        // 최대 재시도 횟수 제한
+        if (newPayment.getRetryCount() > 3) {
+            throw new IllegalStateException("최대 재시도 횟수 초과");
+        }
+
+        paymentRepository.save(newPayment);
     }
 
     @Transactional
