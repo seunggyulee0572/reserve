@@ -14,5 +14,6 @@ public record PaymentFailedEvent(
     String idempotencyKey,
     FailureReason failureReason,
     int retryCount,
+    Boolean retryable,
     LocalDateTime failedAt
 ) {}

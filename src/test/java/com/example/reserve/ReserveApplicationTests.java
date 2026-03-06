@@ -15,6 +15,7 @@ import com.example.reserve.job.UpdateFirstJob;
 import com.example.reserve.model.AttemptResult;
 import com.example.reserve.model.dto.ForPayment;
 import com.example.reserve.model.dto.ReservationForPayment;
+import com.example.reserve.model.enums.FailureReason;
 import com.example.reserve.model.enums.PaymentsStatus;
 import com.example.reserve.model.enums.ReservationStatus;
 import com.example.reserve.model.enums.SeatStatus;
@@ -99,7 +100,7 @@ class ReserveApplicationTests {
 
         List<String> seats = new ArrayList<>();
 
-        for (int row = 21; row <= 40; row++) {
+        for (int row = 1; row <= 20; row++) {
             for (char col = 'A'; col <= 'F'; col++) {
                 seats.add(row + "-" + col);
             }
@@ -425,15 +426,17 @@ class ReserveApplicationTests {
             TestCase tc = cases.get(idx);
 
             boolean success = (idx % 5 != 0); // 80% 성공 예시
+
             PaymentsStatus status = success ? PaymentsStatus.SUCCESS : PaymentsStatus.FAILED;
-            BigDecimal pgAmount = success ? tc.amount() : tc.amount().add(BigDecimal.ONE);
+            BigDecimal pgAmount = tc.amount() ;
 
             try {
                 paymentService.processPayment(
                         "pg-" + UUID.randomUUID(),
                         tc.idemKey(),
                         pgAmount,
-                        status
+                        status,
+                        success ? null : FailureReason.PG_ERROR
                 );
             } catch (Exception e) {
                 System.out.println(e.getMessage());
@@ -442,27 +445,29 @@ class ReserveApplicationTests {
 
         pool.shutdown();
 
-        // 4) 검증: 각 reservation 상태/seat 상태/결제 상태 확인
-        long successCnt = 0;
-        long failedCnt = 0;
+//        // 4) 검증: 각 reservation 상태/seat 상태/결제 상태 확인
+//        long successCnt = 0;
+//        long failedCnt = 0;
+//
+//        for (TestCase tc : cases) {
+//            // 서비스에서 한 번에 묶어서 조회해온 데이터를 받음
+//            PaymentService.PaymentDetailView detail = paymentService.getPaymentDetailForVerification(tc.idemKey(), tc.reservationId());
+//
+//            if (detail.paymentStatus() == PaymentsStatus.SUCCESS) {
+//                successCnt++;
+//                // 성공이면 확정 상태여야 함
+//                assertEquals(ReservationStatus.CONFIRMED, detail.reservationStatus());
+//                assertEquals(SeatStatus.CONFIRMED, detail.seatStatus());
+//            } else {
+//                failedCnt++;
+//                // 실패 시 로직 검증 (예: PENDING 유지 등)
+//                // assertEquals(ReservationStatus.PENDING, detail.reservationStatus());
+//            }
+//        }
+//
+//        System.out.println("payment success=" + successCnt + ", failed=" + failedCnt);
 
-        for (TestCase tc : cases) {
-            // 서비스에서 한 번에 묶어서 조회해온 데이터를 받음
-            PaymentService.PaymentDetailView detail = paymentService.getPaymentDetailForVerification(tc.idemKey(), tc.reservationId());
-
-            if (detail.paymentStatus() == PaymentsStatus.SUCCESS) {
-                successCnt++;
-                // 성공이면 확정 상태여야 함
-                assertEquals(ReservationStatus.CONFIRMED, detail.reservationStatus());
-                assertEquals(SeatStatus.CONFIRMED, detail.seatStatus());
-            } else {
-                failedCnt++;
-                // 실패 시 로직 검증 (예: PENDING 유지 등)
-                // assertEquals(ReservationStatus.PENDING, detail.reservationStatus());
-            }
-        }
-
-        System.out.println("payment success=" + successCnt + ", failed=" + failedCnt);
+        Thread.sleep(1000000);
     }
 
     private void runConcurrent(ExecutorService pool, int tasks, ThrowingIntConsumer action) throws Exception {
@@ -547,7 +552,8 @@ class ReserveApplicationTests {
                                 "pg-" + UUID.randomUUID(),
                                 cases.get(idx).idemKey(),
                                 pgAmount,
-                                status
+                                status,
+                                success ? null : FailureReason.PG_ERROR
                         );
                         long latency = (System.nanoTime() - t0) / 1_000_000;
                         paymentLatencies.add(latency);

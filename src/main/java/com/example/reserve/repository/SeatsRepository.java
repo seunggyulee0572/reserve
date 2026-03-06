@@ -73,6 +73,8 @@ public interface SeatsRepository extends JpaRepository<Seats, UUID> {
                              @Param("userId") String userId);
 
 
+
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
         select s from Seats s

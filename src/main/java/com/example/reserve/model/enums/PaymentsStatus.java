@@ -9,5 +9,6 @@ public enum PaymentsStatus {
     SUCCESS,
     FAILED,
     REFUNDED,
+    RETRYING,
     ;
 }

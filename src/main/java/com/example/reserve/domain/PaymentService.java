@@ -21,6 +21,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.chrono.ChronoLocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -76,7 +77,7 @@ public class PaymentService {
                                FailureReason failureReason) {
 
         Payments payment = paymentRepository
-                .findPaymentsByIdempotencyKeyAndStatus(idempotencyKey, PaymentsStatus.PENDING)
+                .findPaymentsByIdempotencyKeyAndStatusIn(idempotencyKey, List.of(PaymentsStatus.PENDING, PaymentsStatus.RETRYING))
                 .orElseThrow(() -> new IllegalArgumentException("결제 시도 내역이 없음"));
 
         // 금액 불일치 → 재시도 불가 FAILED
@@ -84,6 +85,7 @@ public class PaymentService {
             payment.setStatus(PaymentsStatus.FAILED);
             payment.setFailureReason(FailureReason.AMOUNT_MISMATCH);
             payment.setRetryable(false);
+
             payment.getReservation().setStatus(ReservationStatus.CANCELLED);
             payment.getReservation().getSeats().setSeatStatus(SeatStatus.AVAILABLE);
 
@@ -92,7 +94,7 @@ public class PaymentService {
                     new TransactionSynchronization() {
                         @Override
                         public void afterCommit() {
-                            eventPublisher.publishPaymentFailed(payment, 0);
+                            eventPublisher.publishPaymentFailed(payment, false,payment.getRetryCount());
                         }
                     }
             );
@@ -131,7 +133,7 @@ public class PaymentService {
                     new TransactionSynchronization() {
                         @Override
                         public void afterCommit() {
-                            eventPublisher.publishPaymentFailed(payment, 0);
+                            eventPublisher.publishPaymentFailed(payment, retryable,payment.getRetryCount());
                         }
                     }
             );
@@ -139,29 +141,25 @@ public class PaymentService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void retryPayment(UUID reservationId) {
+    public String retryPayment(UUID reservationId, BigDecimal amount, int retryCount) {
 
-        // 재시도 가능한 FAILED 건만 대상
-        Payments failed = paymentRepository
-                .findRetryableFailedPayment(reservationId)  // retryable=true, status=FAILED
-                .orElseThrow(() -> new IllegalArgumentException("재시도 가능한 결제 없음"));
-
-        // 기존 FAILED는 그대로 두고 새 idemKey로 새 결제 시도 생성
-        String newIdemKey = "retry-" + reservationId + "-" + UUID.randomUUID();
-
-        Payments newPayment = new Payments();
-        newPayment.setAmount(failed.getAmount());
-        newPayment.setReservation(failed.getReservation());
-        newPayment.setStatus(PaymentsStatus.PENDING);
-        newPayment.setIdempotencyKey(newIdemKey);
-        newPayment.setRetryCount(failed.getRetryCount() + 1);
-
-        // 최대 재시도 횟수 제한
-        if (newPayment.getRetryCount() > 3) {
+        if (retryCount > 3) {
             throw new IllegalStateException("최대 재시도 횟수 초과");
         }
 
-        paymentRepository.save(newPayment);
+        Payments payment = paymentRepository.findRetryableFailedPayment(reservationId)
+                .orElseThrow(() -> new IllegalArgumentException("재시도 가능한 결제 없음"));
+
+        String newIdemKey = "retry-" + reservationId + "-" + UUID.randomUUID();
+        payment.setIdempotencyKey(newIdemKey);
+        payment.setStatus(PaymentsStatus.RETRYING);
+        payment.setRetryCount(retryCount);
+        payment.setPaymentKey(null);
+
+        paymentRepository.saveAndFlush(payment);
+        System.out.println("retryPayment 호출 후 retryCount: " + payment.getRetryCount());  // 확인
+
+        return newIdemKey;  // 새 idemKey 반환
     }
 
     @Transactional

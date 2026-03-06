@@ -63,4 +63,6 @@ public class SeatService {
 
         seatsRepository.saveAll(list);
     }
+
+
 }

@@ -182,10 +182,13 @@ public interface ReservationsRepository extends JpaRepository<Reservations, UUID
     int markExpiredIfStillExpired(@Param("id") UUID id);
 
     @Query(value = """
-        SELECT r.event_id, r.seat_id, r.user_id
-          FROM reservations r
-         WHERE r.id = :id
-        """, nativeQuery = true)
+    SELECT BIN_TO_UUID(r.event_id) as eventId,
+           BIN_TO_UUID(r.seat_id)  as seatId,
+           r.user_id               as userId,
+           BIN_TO_UUID(r.id)       as reservationId
+      FROM reservations r
+     WHERE r.id = :id
+    """, nativeQuery = true)
     ReservationRefs findRefsById(@Param("id") UUID id);
 
     @Query("""

@@ -5,6 +5,7 @@ import com.example.reserve.entity.Reservations;
 import com.example.reserve.entity.Seats;
 import com.example.reserve.model.dto.ForPayment;
 import com.example.reserve.model.dto.ReservationForPayment;
+import com.example.reserve.model.dto.ReservationRefs;
 import com.example.reserve.model.enums.ReservationStatus;
 import com.example.reserve.model.enums.SeatStatus;
 import com.example.reserve.repository.EventsRepository;
@@ -254,6 +255,26 @@ public class ReservationService {
                 limit);
 
 
+    }
+
+    @Transactional
+    public void releaseSeatsByReservationId( UUID reservationId ){
+
+        ReservationRefs ref = reservationsRepository.findRefsById(reservationId);
+
+        Reservations reservations = reservationsRepository.findById(reservationId).orElseThrow();
+
+        reservations.setStatus(ReservationStatus.CANCELLED);
+
+        int update = seatsRepository.restoreSeatIfMatches(ref.getSeatId(), ref.getUserId());
+
+        if( update == 0)
+            throw new IllegalArgumentException("좌석 되돌리기 실패");
+
+        int eventUpdate = eventsRepository.increaseAvailableSeats(ref.getEventId(), 1);
+
+        if( eventUpdate == 0)
+            throw new IllegalArgumentException("좌석 수 되돌리기 실패");
     }
 
 

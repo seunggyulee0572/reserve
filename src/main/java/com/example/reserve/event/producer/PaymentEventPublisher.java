@@ -30,7 +30,7 @@ public class PaymentEventPublisher {
         );
     }
 
-    public void publishPaymentFailed(Payments payment, int retryCount) {
+    public void publishPaymentFailed(Payments payment, Boolean retryable, int retryCount) {
         PaymentFailedEvent event = new PaymentFailedEvent(
                 payment.getId(),
                 payment.getReservation().getId(),
@@ -39,8 +39,13 @@ public class PaymentEventPublisher {
                 payment.getIdempotencyKey(),
                 payment.getFailureReason(),
                 retryCount,
+                retryable,
                 LocalDateTime.now()
         );
+
+        final int currentRetryCount = payment.getRetryCount();
+        System.out.println("publishPaymentFailed retryCount: " + currentRetryCount);  // 확인
+
         kafkaTemplate.send("payment.failed",
                 payment.getReservation().getId().toString(),
                 event
