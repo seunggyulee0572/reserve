@@ -511,7 +511,7 @@ class ReserveApplicationTests {
         ExecutorService paymentPool = Executors.newFixedThreadPool(paymentUsers);
         ExecutorService schedulerPool = Executors.newFixedThreadPool(schedulerThreads);
 
-        CountDownLatch ready = new CountDownLatch(paymentUsers + schedulerThreads);
+        CountDownLatch ready = newㅍ CountDownLatch(paymentUsers + schedulerThreads);
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(paymentUsers + schedulerThreads);
 

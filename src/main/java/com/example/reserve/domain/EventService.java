@@ -19,7 +19,7 @@ public class EventService {
 
     // todo : 임시로 테스트용 1개 생성
     @Transactional
-    public void generateEvent() {
+    public UUID generateEvent() {
 
         Events event = new Events();
 
@@ -28,7 +28,9 @@ public class EventService {
         event.setAvailableSeats( 1000 );
         event.setEventDate(LocalDateTime.now());
 
-        eventsRepository.save(event);
+        Events save = eventsRepository.save(event);
+
+        return save.getId();
     }
 
     public UUID getEventId() {

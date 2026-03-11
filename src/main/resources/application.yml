@@ -14,6 +14,24 @@ spring:
   application:
     name: reserve-application
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+
+  endpoint:
+    health:
+      show-details: always
+
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+    export:
+      prometheus:
+        enabled: true
+
 application:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
